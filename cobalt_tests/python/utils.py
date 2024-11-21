@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 import plotnine as p9
+import seaborn as sns
 
 
 class BalanceTable:
@@ -126,3 +129,62 @@ class BalanceTable:
             p += p9.geom_hline(yintercept=-abs(threshold), linetype='dashed', color='red')
 
         return p
+
+    def balance_plot(self, covariate, n_bins=20):
+        """
+        Generate a balance plot for the specified covariate.
+
+        Parameters:
+            covariate (str): The covariate to plot.
+            n_bins (int): The number of bins to use for the histogram.
+        """
+
+        df_plot = pd.DataFrame({
+            "covariate": self.df[covariate],
+            "unadjusted": 1.0,
+            "adjusted": self.weights,
+            "treatment": np.where(self.df[self.treatment] == 1, "Treated", "Control")
+        }).melt(
+            value_vars=["unadjusted", "adjusted"],
+            id_vars=["treatment", "covariate"],
+            var_name="Sample",
+            value_name="weight")
+
+        # Create subplots (2 subplots for 'unadjusted' and 'adjusted')
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+
+        # Define color mapping for treatment groups
+        palette = sns.color_palette("colorblind")
+        colors = {'Treated': palette[0], 'Control': palette[1]}
+
+        # Plot each subplot
+        for i, sample in enumerate(["unadjusted", "adjusted"]):
+            ax = axes[i]
+            # Filter data for the current sample
+            sample_data = df_plot[df_plot['Sample'] == sample]
+
+            # Plot the histogram for each treatment group with separate histograms
+            for treatment_group in ['Treated', 'Control']:
+                treatment_data = sample_data[sample_data['treatment'] == treatment_group]
+                sns.histplot(
+                    treatment_data,
+                    x="covariate",
+                    weights="weight",
+                    kde=True,
+                    alpha=0.6,
+                    stat="density",
+                    bins=n_bins,
+                    color=colors[treatment_group],
+                    label=treatment_group,
+                    ax=ax
+                )
+            ax.set_title(f"{sample.capitalize()} Distribution")
+            ax.set_xlabel(covariate)
+            ax.set_ylabel('Density')
+            ax.legend(title='Treatment')
+
+        # Adjust the layout and title
+        plt.subplots_adjust(top=0.85)
+        fig.suptitle(f'Distributional Balance for {covariate}', fontsize=16)
+
+        return fig
