@@ -203,3 +203,73 @@ class BalanceTable:
         fig.suptitle(f'Distributional Balance for {covariate}', fontsize=16)
 
         return fig
+
+    def plot_prop_balance(self, propensity_score, covs=None, n_bins=10):
+
+        if covs is None:
+            covs = self.cov_cols
+
+        treated = self.df[self.treatment] == 1
+        control = self.df[self.treatment] == 0
+
+        bin_edges = np.linspace(propensity_score.min(),
+                                propensity_score.max(), n_bins + 1)
+        bin_midpoints = [(bin_edges[i] + bin_edges[i+1]) / 2 for i in range(n_bins)]
+        bin_size = [(bin_edges[i+1] - bin_edges[i]) for i in range(n_bins)]
+
+        bin_obs_list = [None] * n_bins
+        for i, (bin_start, bin_end) in enumerate(zip(bin_edges[:-1], bin_edges[1:])):
+            if i == 0:
+                bin_obs_list[i] = (propensity_score >= bin_start) & (propensity_score <= bin_end)
+            else:
+                bin_obs_list[i] = (propensity_score > bin_start) & (propensity_score <= bin_end)
+
+        df_plot = pd.DataFrame()
+        smd = np.full((n_bins, len(covs)), np.nan)
+        for j, column in enumerate(covs):
+            # scaling on the whole sample
+            col_is_binary = set(self.df[column].unique()).issubset({0, 1})
+            if col_is_binary:
+                sd = 1
+            else:
+                s0 = self.df[column][control].std()
+                s1 = self.df[column][treated].std()
+                sd2 = (s0**2 + s1**2) / 2
+                sd = np.sqrt(sd2)
+
+            for i, bin_obs in enumerate(bin_obs_list):
+
+                df_bin_treated = self.df[treated & bin_obs]
+                df_bin_control = self.df[control & bin_obs]
+
+                if len(df_bin_treated) == 0 or len(df_bin_control) == 0:
+                    mean_diff = 0
+                elif len(df_bin_treated) == 0:
+                    mean_diff = 5
+                elif len(df_bin_control) == 0:
+                    mean_diff = -5
+                else:
+                    treated_mean = np.average(df_bin_treated[column])
+                    control_mean = np.average(df_bin_control[column])
+                    mean_diff = treated_mean - control_mean
+
+                smd[i, j] = mean_diff / sd
+
+                df_plot_cov = pd.DataFrame({
+                    "bin_midpoints": bin_midpoints,
+                    "bin_size": bin_size,
+                    "smd": smd[:, j],
+                    "covariate": column,
+                })
+
+            df_plot = pd.concat([df_plot, df_plot_cov], ignore_index=True)
+
+        p = (p9.ggplot(df_plot, p9.aes(x='bin_midpoints', y='smd', fill="covariate")) +
+             p9.geom_point(size=2) +
+             p9.geom_line(mapping=p9.aes(color="covariate"), size=.5) +
+             p9.theme_minimal() +
+             p9.theme_bw() +
+             p9.coord_flip() +
+             p9.labs(title='Covariate Balance', x='Propensity Score', y='Standardized Mean Difference (SMD)'))
+
+        return p
