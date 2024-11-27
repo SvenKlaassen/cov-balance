@@ -148,7 +148,7 @@ class BalanceTable:
 
         df_plot = pd.DataFrame({
             "covariate": self.df[covariate],
-            "unadjusted": np.where(treated, 1/n_treated, 1/n_control),
+            "unadjusted": 1.0,
             "adjusted": self.weights,
             "treatment": np.where(treated, "Treated", "Control")
         }).melt(
@@ -159,47 +159,57 @@ class BalanceTable:
 
         # Create subplots (2 subplots for 'unadjusted' and 'adjusted')
         fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-        palette = sns.color_palette("colorblind")
+        palette = sns.color_palette()
         colors = {'Treated': palette[0], 'Control': palette[1]}
 
         for i, sample in enumerate(["unadjusted", "adjusted"]):
             ax = axes[i]
+            ax.set_title(f"{sample.capitalize()} Distribution")
+            ax.set_xlabel(covariate)
+            ax.set_ylabel('Proportion')
+
             sample_data = df_plot[df_plot['Sample'] == sample]
-
-            if cov_is_binary:
-                sns.histplot(
-                    sample_data,
-                    x="covariate",
-                    hue="treatment",
-                    weights="weight",
-                    alpha=0.6,
-                    stat="proportion",
-                    discrete=True,
-                    multiple="dodge",
-                    shrink=0.8,
-                    ax=ax,
-                )
-            else:
-                sns.histplot(
-                    sample_data,
-                    x="covariate",
-                    hue="treatment",
-                    weights="weight",
-                    kde=False,
-                    alpha=0.6,
-                    stat="proportion",
-                    bins=n_bins,
-                    ax=ax,
-                )
-
             if cov_is_binary:
                 unique_values = sorted(sample_data['covariate'].unique())
                 ax.set_xticks(unique_values)
                 ax.set_xticklabels(unique_values)
+            else:
+                bin_range = (sample_data['covariate'].min(), sample_data['covariate'].max())
 
-            ax.set_title(f"{sample.capitalize()} Distribution")
-            ax.set_xlabel(covariate)
-            ax.set_ylabel('Proportion')
+            for treatment_group in ['Treated', 'Control']:
+                treatment_data = sample_data[sample_data['treatment'] == treatment_group].copy()
+
+                if cov_is_binary:
+                    # adjust x to avoid overlapping bars
+                    x_adjustment = 0.2 if treatment_group == 'Control' else -0.2
+                    treatment_data["covariate"] += x_adjustment
+                    sns.histplot(
+                        treatment_data,
+                        x="covariate",
+                        weights="weight",
+                        alpha=0.6,
+                        stat="proportion",
+                        color=colors[treatment_group],
+                        label=treatment_group,
+                        discrete=True,
+                        shrink=0.4,
+                        ax=ax
+                    )
+                else:
+                    sns.histplot(
+                        treatment_data,
+                        x="covariate",
+                        weights="weight",
+                        alpha=0.6,
+                        stat="proportion",
+                        bins=n_bins,
+                        color=colors[treatment_group],
+                        label=treatment_group,
+                        binrange=bin_range,
+                        ax=ax
+                    )
+
+            ax.legend(title='Treatment')
 
         plt.subplots_adjust(top=0.85)
         fig.suptitle(f'Distributional Balance for {covariate}', fontsize=16)
