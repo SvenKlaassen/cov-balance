@@ -73,7 +73,8 @@ class BalanceTable:
             if col_is_binary:
                 sd = 1
             else:
-                sd2 = weights_factor * np.sum(self.weights * (self.df[column] - np.mean(self.df[column]))**2)
+                weighted_mean = np.average(self.df[column], weights=self.weights)
+                sd2 = weights_factor * np.sum(self.weights * (self.df[column] - weighted_mean)**2)
                 sd = np.sqrt(sd2)
 
             treated_mean_balanced = np.average(df_treated[column], weights=self.weights[df_treated.index])
@@ -93,7 +94,7 @@ class BalanceTable:
             })
             df_smd = pd.concat([df_smd, new_row], ignore_index=True)
 
-        return df_effective_sample_size, df_smd
+        return df_effective_sample_size, df_smd.round(4)
 
     def love_plot(self, thresholds=[0.1]):
         """
@@ -140,11 +141,16 @@ class BalanceTable:
         """
 
         cov_is_binary = set(self.df[covariate].unique()).issubset({0, 1})
+
+        treated = self.df[self.treatment] == 1
+        n_treated = treated.sum()
+        n_control = (~treated).sum()
+
         df_plot = pd.DataFrame({
             "covariate": self.df[covariate],
-            "unadjusted": 1.0,
+            "unadjusted": np.where(treated, 1/n_treated, 1/n_control),
             "adjusted": self.weights,
-            "treatment": np.where(self.df[self.treatment] == 1, "Treated", "Control")
+            "treatment": np.where(treated, "Treated", "Control")
         }).melt(
             value_vars=["unadjusted", "adjusted"],
             id_vars=["treatment", "covariate"],
@@ -160,44 +166,40 @@ class BalanceTable:
             ax = axes[i]
             sample_data = df_plot[df_plot['Sample'] == sample]
 
-            for treatment_group in ['Treated', 'Control']:
-                treatment_data = sample_data[sample_data['treatment'] == treatment_group]
+            if cov_is_binary:
+                sns.histplot(
+                    sample_data,
+                    x="covariate",
+                    hue="treatment",
+                    weights="weight",
+                    alpha=0.6,
+                    stat="proportion",
+                    discrete=True,
+                    multiple="dodge",
+                    shrink=0.8,
+                    ax=ax,
+                )
+            else:
+                sns.histplot(
+                    sample_data,
+                    x="covariate",
+                    hue="treatment",
+                    weights="weight",
+                    kde=False,
+                    alpha=0.6,
+                    stat="proportion",
+                    bins=n_bins,
+                    ax=ax,
+                )
 
-                if cov_is_binary:
-                    sns.histplot(
-                        treatment_data,
-                        x="covariate",
-                        weights="weight",
-                        alpha=0.6,
-                        stat="density",
-                        color=colors[treatment_group],
-                        label=treatment_group,
-                        discrete=True,
-                        ax=ax
-                    )
-                else:
-                    sns.histplot(
-                        treatment_data,
-                        x="covariate",
-                        weights="weight",
-                        kde=True,
-                        alpha=0.6,
-                        stat="density",
-                        bins=n_bins,
-                        color=colors[treatment_group],
-                        label=treatment_group,
-                        ax=ax
-                    )
+            if cov_is_binary:
+                unique_values = sorted(sample_data['covariate'].unique())
+                ax.set_xticks(unique_values)
+                ax.set_xticklabels(unique_values)
 
-                if cov_is_binary:
-                    unique_values = sorted(sample_data['covariate'].unique())
-                    ax.set_xticks(unique_values)
-                    ax.set_xticklabels(unique_values)
-
-                ax.set_title(f"{sample.capitalize()} Distribution")
-                ax.set_xlabel(covariate)
-                ax.set_ylabel('Proportion')
-                ax.legend(title='Treatment')
+            ax.set_title(f"{sample.capitalize()} Distribution")
+            ax.set_xlabel(covariate)
+            ax.set_ylabel('Proportion')
 
         plt.subplots_adjust(top=0.85)
         fig.suptitle(f'Distributional Balance for {covariate}', fontsize=16)
