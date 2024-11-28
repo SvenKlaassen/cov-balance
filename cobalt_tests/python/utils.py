@@ -1,5 +1,7 @@
+import warnings
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 import plotnine as p9
@@ -143,8 +145,6 @@ class BalanceTable:
         cov_is_binary = set(self.df[covariate].unique()).issubset({0, 1})
 
         treated = self.df[self.treatment] == 1
-        n_treated = treated.sum()
-        n_control = (~treated).sum()
 
         df_plot = pd.DataFrame({
             "covariate": self.df[covariate],
@@ -216,7 +216,7 @@ class BalanceTable:
 
         return fig
 
-    def plot_prop_balance(self, propensity_score, covs=None, n_bins=10):
+    def plot_prop_balance(self, propensity_score, covs=None, n_bins=10, confint=False, level=0.95):
 
         if covs is None:
             covs = self.cov_cols
@@ -238,41 +238,80 @@ class BalanceTable:
 
         df_plot = pd.DataFrame()
         smd = np.full((n_bins, len(covs)), np.nan)
+        lower_bounds = np.full((n_bins, len(covs)), np.nan)
+        upper_bounds = np.full((n_bins, len(covs)), np.nan)
         for j, column in enumerate(covs):
             # scaling on the whole sample
             col_is_binary = set(self.df[column].unique()).issubset({0, 1})
             if col_is_binary:
                 sd = 1
             else:
-                s0 = self.df[column][control].std()
-                s1 = self.df[column][treated].std()
-                sd2 = (s0**2 + s1**2) / 2
+                s0_sample = self.df[column][control].std()
+                s1_sample = self.df[column][treated].std()
+                # using pooled variance from cobalt
+                sd2 = (s0_sample**2 + s1_sample**2) / 2
                 sd = np.sqrt(sd2)
 
             for i, bin_obs in enumerate(bin_obs_list):
 
                 df_bin_treated = self.df[treated & bin_obs]
                 df_bin_control = self.df[control & bin_obs]
+                n0 = len(df_bin_control)
+                n1 = len(df_bin_treated)
 
-                if len(df_bin_treated) == 0 or len(df_bin_control) == 0:
-                    mean_diff = 0
-                elif len(df_bin_treated) == 0:
-                    mean_diff = 5
-                elif len(df_bin_control) == 0:
-                    mean_diff = -5
+                if n0 == 0 and n1 == 0:
+                    bin_smd = 0
+                    bin_lower_bound = 0
+                    bin_upper_bound = 0
+                elif n1 == 0:
+                    warnings.warn(f"No treated observations in bin {i}. Setting SMD to 5.")
+                    bin_smd = 5
+                    bin_lower_bound = 5
+                    bin_upper_bound = 5
+                elif n0 == 0:
+                    warnings.warn(f"No control observations in bin {i}. Setting SMD to -5.")
+                    bin_smd = -5
+                    bin_lower_bound = -5
+                    bin_upper_bound = -5
                 else:
                     treated_mean = np.average(df_bin_treated[column])
                     control_mean = np.average(df_bin_control[column])
                     mean_diff = treated_mean - control_mean
+                    bin_smd = mean_diff / sd
 
-                smd[i, j] = mean_diff / sd
+                    if n1 < 2 or n0 < 2:
+                        warnings.warn(f"Bin {i} has less than 2 observations in one group. No CI computed.")
+                        bin_lower_bound = np.nan
+                        bin_upper_bound = np.nan
+                    else:
+                        s0 = df_bin_control[column].std()
+                        s1 = df_bin_treated[column].std()
 
-                df_plot_cov = pd.DataFrame({
-                    "bin_midpoints": bin_midpoints,
-                    "bin_size": bin_size,
-                    "smd": smd[:, j],
-                    "covariate": column,
-                })
+                        sd_diff = np.sqrt((s0**2 / n0) + (s1**2 / n1))
+
+                        if n0 == 1 or n1 == 1:
+                            df = 1
+                        else:
+                            df = ((s0**2 / n0) + (s1**2 / n1))**2 / (
+                                ((s0**2 / n0)**2 / (n0 - 1)) + ((s1**2 / n1)**2 / (n1 - 1)))
+
+                        t_critical = stats.t.ppf((1 + level) / 2, df)
+
+                        bin_lower_bound = (mean_diff - t_critical * sd_diff) / sd
+                        bin_upper_bound = (mean_diff + t_critical * sd_diff) / sd
+
+                smd[i, j] = bin_smd
+                lower_bounds[i, j] = bin_lower_bound
+                upper_bounds[i, j] = bin_upper_bound
+
+            df_plot_cov = pd.DataFrame({
+                "bin_midpoints": bin_midpoints,
+                "bin_size": bin_size,
+                "smd": smd[:, j],
+                "covariate": column,
+                "lower_bound": lower_bounds[:, j],
+                "upper_bound": upper_bounds[:, j]
+            })
 
             df_plot = pd.concat([df_plot, df_plot_cov], ignore_index=True)
 
@@ -283,5 +322,8 @@ class BalanceTable:
              p9.theme_bw() +
              p9.coord_flip() +
              p9.labs(title='Covariate Balance', x='Propensity Score', y='Standardized Mean Difference (SMD)'))
+
+        if confint:
+            p += p9.geom_ribbon(p9.aes(ymin='lower_bound', ymax='upper_bound', fill="covariate"), alpha=0.2)
 
         return p
