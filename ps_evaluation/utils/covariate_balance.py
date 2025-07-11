@@ -9,6 +9,14 @@ import plotnine as p9
 import seaborn as sns
 
 
+# Get current palette colors for plotnine
+def get_current_palette_colors():
+    """Get current seaborn palette colors as hex for plotnine"""
+    from matplotlib.colors import to_hex
+
+    return [to_hex(c) for c in sns.color_palette()]
+
+
 class BalanceTable:
     def __init__(self, df, cov_cols, treatment, weights):
         """
@@ -394,9 +402,6 @@ class BalanceTable:
         return p
 
 
-from sklearn.neighbors import NearestNeighbors
-
-
 class MultiMethodBalanceTable:
     def __init__(
         self, df, cov_cols, treatment, propensity_scores_dict, matching_methods=None
@@ -567,6 +572,9 @@ class MultiMethodBalanceTable:
         """
         comparison_df = self.get_smd_comparison()
 
+        # Get current palette colors
+        palette_colors = get_current_palette_colors()
+
         # Reshape for plotting
         plot_df = comparison_df.melt(
             id_vars=[
@@ -583,37 +591,48 @@ class MultiMethodBalanceTable:
 
         # Create base plot
         if facet_by == "weighting_method":
-            p = (p9.ggplot(
-                plot_df,
-                p9.aes(x="covariate", y="SMD", color="ps_method", shape="adjustment"),
-            ) 
-            + p9.facet_wrap("~weighting_method")
-            + p9.geom_point(size=3, position=p9.position_dodge(width=0.3))
-            + p9.coord_flip()
-            + p9.geom_hline(yintercept=0.1, linetype="dashed", color="red")
-            + p9.geom_hline(yintercept=-0.1, linetype="dashed", color="red")
-            + p9.labs(
-                title="SMD Comparison Across Methods and Weighting Schemes",
-                x="Covariate",
-                y="Standardized Mean Difference",
-            ))
+            p = (
+                p9.ggplot(
+                    plot_df,
+                    p9.aes(
+                        x="covariate", y="SMD", color="ps_method", shape="adjustment"
+                    ),
+                )
+                + p9.facet_wrap("~weighting_method")
+                + p9.geom_point(size=3, position=p9.position_dodge(width=0.3))
+                + p9.coord_flip()
+                + p9.geom_hline(yintercept=0.1, linetype="dashed", color="red")
+                + p9.geom_hline(yintercept=-0.1, linetype="dashed", color="red")
+                + p9.scale_color_manual(values=palette_colors)
+                + p9.labs(
+                    title="SMD Comparison Across Methods and Weighting Schemes",
+                    x="Covariate",
+                    y="Standardized Mean Difference",
+                )
+            )
         else:  # facet_by == 'ps_method'
-            p = (p9.ggplot(
-                plot_df,
-                p9.aes(
-                    x="covariate", y="SMD", color="weighting_method", shape="adjustment"
-                ),
-            ) 
-            + p9.facet_wrap("~ps_method")
-            + p9.geom_point(size=3, position=p9.position_dodge(width=0.3))
-            + p9.coord_flip()
-            + p9.geom_hline(yintercept=0.1, linetype="dashed", color="red")
-            + p9.geom_hline(yintercept=-0.1, linetype="dashed", color="red")
-            + p9.labs(
-                title="SMD Comparison Across Methods and Weighting Schemes",
-                x="Covariate",
-                y="Standardized Mean Difference",
-            ))
+            p = (
+                p9.ggplot(
+                    plot_df,
+                    p9.aes(
+                        x="covariate",
+                        y="SMD",
+                        color="weighting_method",
+                        shape="adjustment",
+                    ),
+                )
+                + p9.facet_wrap("~ps_method")
+                + p9.geom_point(size=3, position=p9.position_dodge(width=0.3))
+                + p9.coord_flip()
+                + p9.geom_hline(yintercept=0.1, linetype="dashed", color="red")
+                + p9.geom_hline(yintercept=-0.1, linetype="dashed", color="red")
+                + p9.scale_color_manual(values=palette_colors)
+                + p9.labs(
+                    title="SMD Comparison Across Methods and Weighting Schemes",
+                    x="Covariate",
+                    y="Standardized Mean Difference",
+                )
+            )
 
         return p
 
